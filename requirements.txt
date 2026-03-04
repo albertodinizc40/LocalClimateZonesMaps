@@ -3,3 +3,4 @@ leafmap
 localtileserver
 geopandas
 rasterio
+matplotlib
