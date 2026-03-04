@@ -11,7 +11,7 @@ from matplotlib.colors import to_rgba
 # 1. Page Configuration
 st.set_page_config(page_title="LCZ Bangalore Dashboard", layout="wide", initial_sidebar_state="expanded")
 
-# --- DICTIONARY & COLORS ---
+# --- LCZ CATEGORIES & COLORS (From official documentation) ---
 lcz_legend = {
     "1: Compact highrise": "#910613", "2: Compact midrise": "#D9081C", "3: Compact lowrise": "#FF0A22",
     "4: Open highrise": "#C54F1E", "5: Open midrise": "#FF6628", "6: Open lowrise": "#FF985E",
@@ -29,79 +29,80 @@ tif_path = 'lcz_clipped_mask.tif'
 def process_spatial_data(tif_path):
     with rasterio.open(tif_path) as src:
         img_array = src.read(1)
+        # Getting real-world bounds for the ImageOverlay
         bounds = [[src.bounds.bottom, src.bounds.left], [src.bounds.top, src.bounds.right]]
     
+    # Statistical counting for the chart
     unique, counts = np.unique(img_array, return_counts=True)
     df_stats = pd.DataFrame({'Class_ID': unique, 'Pixels': counts})
-    df_stats = df_stats[df_stats['Class_ID'] > 0] 
+    df_stats = df_stats[df_stats['Class_ID'] > 0] # Remove background (0)
     
     return img_array, bounds, df_stats
 
 img_array, bounds, df_stats = process_spatial_data(tif_path)
 
-# --- SIDEBAR MENU ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/1865/1865313.png", width=50)
     st.title("Map Controls")
-    st.markdown("Use the **vertical swipe tool** on the map to compare the Local Climate Zones (Left) with the real Satellite imagery (Right).")
+    st.info("Drag the vertical bar in the center of the map to compare the Local Climate Zones (Left) with the Satellite view (Right).")
     st.markdown("---")
-    st.markdown("**About the Project:**\nLocal Climate Zones (LCZ) analysis for urban planning and environmental monitoring.")
+    st.markdown("**Project Info:**\nLocal Climate Zone (LCZ) classification for Bangalore based on Stewart and Oke (2012) typology.")
 
-# --- MAIN LAYOUT (DASHBOARD) ---
+# --- MAIN DASHBOARD LAYOUT ---
 st.title("🗺️ Local Climate Zones Dashboard - Bangalore")
 st.markdown("Overview of the urban climate distribution. Interact with the map and the charts below.")
 
 col_map, col_chart = st.columns([2, 1])
 
 with col_map:
-    st.subheader("Interactive Swipe Map")
+    st.subheader("Interactive Swipe Comparison")
     
-    # Create colored image (Fully opaque for the swipe effect)
+    # Prepare the colored LCZ image
     colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
     for idx, (name, hex_color) in enumerate(lcz_legend.items()):
         class_number = idx + 1 
         r, g, b, _ = to_rgba(hex_color)
-        colored_img[img_array == class_number] = [r, g, b, 1.0] # 100% opacity
+        colored_img[img_array == class_number] = [r, g, b, 1.0] # 100% opacity for clear comparison
 
-    # Initialize Leafmap
-    m = leafmap.Map(center=[12.9716, 77.5946], zoom=10, draw_control=False)
-    m.clear_layers() # Clear default basemaps to avoid interference
-    
-    # 1. Add Satellite Layer (Will be on the Right)
-    sat_layer = folium.TileLayer(
+    # Initialize the Map with no default tiles to avoid the clear_layers bug
+    m = leafmap.Map(center=[12.9716, 77.5946], zoom=11, tiles=None)
+
+    # 1. Add Satellite as the RIGHT layer
+    right_layer = folium.TileLayer(
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         attr='Esri Satellite',
-        name='Satellite Base',
-        overlay=True
+        name='Satellite View'
     ).add_to(m)
     
-    # 2. Add LCZ Image Overlay (Will be on the Left)
-    lcz_layer = folium.raster_layers.ImageOverlay(
+    # 2. Add LCZ as the LEFT layer
+    left_layer = folium.raster_layers.ImageOverlay(
         image=colored_img,
         bounds=bounds,
-        name='LCZ Overlay'
+        name='LCZ Map'
     ).add_to(m)
     
-    # 3. Add the Side by Side (Swipe) Plugin
-    sbs = SideBySideLayers(layer_left=lcz_layer, layer_right=sat_layer)
-    sbs.add_to(m)
+    # 3. Apply the Swipe (Side-by-Side) Plugin
+    SideBySideLayers(layer_left=left_layer, layer_right=right_layer).add_to(m)
 
-    # 4. Add Boundaries and Legend
+    # 4. Add UI elements (Boundaries and Legend)
     m.add_geojson(geojson_path, layer_name="Bangalore Boundaries", fill_colors=['transparent'], weight=2, color="white")
-    m.add_legend(title="Local Climate Zones", legend_dict=lcz_legend)
+    m.add_legend(title="LCZ Classes", legend_dict=lcz_legend)
     
-    # Render map
-    m.to_streamlit(height=550)
+    # Display the map
+    m.to_streamlit(height=600)
 
 with col_chart:
-    st.subheader("Zone Distribution")
+    st.subheader("Distribution Analysis")
     
+    # Prepare chart data
     class_names = list(lcz_legend.keys())
     hex_colors = list(lcz_legend.values())
     
     df_stats['Name'] = df_stats['Class_ID'].apply(lambda x: class_names[x-1] if x <= len(class_names) else "Other")
     df_stats['Color'] = df_stats['Class_ID'].apply(lambda x: hex_colors[x-1] if x <= len(hex_colors) else "#000000")
     
+    # Focus on the Top 8 most frequent zones for clarity
     df_stats = df_stats.sort_values(by='Pixels', ascending=False).head(8)
     
     fig = px.bar(
@@ -111,7 +112,7 @@ with col_chart:
         orientation='h',
         color='Name',
         color_discrete_sequence=df_stats['Color'].tolist(),
-        title="Top 8 Predominant Classes"
+        title="Top 8 Predominant Zones"
     )
     
     fig.update_layout(
