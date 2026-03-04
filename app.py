@@ -1,14 +1,15 @@
 import streamlit as st
-import leafmap.foliumap as leafmap
 import folium
-from folium.plugins import SideBySideLayers
+from folium.plugins import DualMap
+from streamlit_folium import st_folium
 import rasterio
 import numpy as np
 import pandas as pd
 import plotly.express as px
 from matplotlib.colors import to_rgba
+import json
 
-# 1. Page Configuration (No more sidebar expanded by default)
+# 1. Page Configuration
 st.set_page_config(page_title="LCZ Bangalore Dashboard", layout="wide")
 
 # --- LCZ CATEGORIES & COLORS ---
@@ -39,55 +40,68 @@ def process_spatial_data(tif_path):
 img_array, bounds, df_stats = process_spatial_data(tif_path)
 
 
-# --- MAIN LAYOUT (Full Width, No Sidebar) ---
+# --- MAIN LAYOUT ---
 st.title("🗺️ Local Climate Zones Dashboard - Bangalore")
-st.markdown("Overview of the urban climate distribution. Interact with the map and the charts below.")
+st.markdown("Overview of the urban climate distribution. Use the synchronized map below to compare the zones with satellite imagery.")
 
-col_map, col_chart = st.columns([2.5, 1]) # O mapa fica um pouco mais largo agora
+col_map, col_chart = st.columns([2.5, 1])
 
 with col_map:
-    # Prepare LCZ image
+    # Prepare LCZ image layer
     colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
     for idx, (name, hex_color) in enumerate(lcz_legend.items()):
         class_number = idx + 1 
         r, g, b, _ = to_rgba(hex_color)
         colored_img[img_array == class_number] = [r, g, b, 1.0]
 
-    # Initialize map
-    m = leafmap.Map(center=[12.9716, 77.5946], zoom=10, draw_control=False)
+    # Initialize Synchronized Dual Map (Left and Right)
+    m = DualMap(location=[12.9716, 77.5946], zoom_start=11, layout='horizontal')
 
-    # RIGHT LAYER: Satellite imagery
-    sat_layer = folium.TileLayer(
+    # Add Satellite Basemap to BOTH sides
+    folium.TileLayer(
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         attr='Esri Satellite',
-        name='Satellite View',
-        control=True
-    ).add_to(m)
+        name='Satellite Base'
+    ).add_to(m.m1)
+    
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri Satellite',
+        name='Satellite Base'
+    ).add_to(m.m2)
 
-    # LEFT LAYER: Local Climate Zones
-    lcz_layer = folium.raster_layers.ImageOverlay(
+    # Add LCZ Overlay ONLY TO THE LEFT SIDE (m.m1)
+    folium.raster_layers.ImageOverlay(
         image=colored_img,
         bounds=bounds,
         name='Local Climate Zones',
-        control=True
-    ).add_to(m)
-    
-    # Apply Swipe Plugin (Side by Side)
-    SideBySideLayers(layer_left=lcz_layer, layer_right=sat_layer).add_to(m)
+        show=True
+    ).add_to(m.m1)
 
-    # Boundaries
-    m.add_geojson(geojson_path, layer_name="City Boundaries", fill_colors=['transparent'], weight=2, color="white")
-    
-    # FORÇA O MENU DE CAMADAS A APARECER
-    folium.LayerControl(position="topright").add_to(m)
+    # Fix: Correctly load and style the GeoJSON boundaries
+    try:
+        with open(geojson_path, 'r') as f:
+            geo_data = json.load(f)
+        
+        boundary_style = {'fillOpacity': 0, 'color': 'white', 'weight': 3}
+        
+        # Add boundary to both maps so you never lose track of the city limits
+        folium.GeoJson(geo_data, name="Bangalore Boundaries", style_function=lambda x: boundary_style).add_to(m.m1)
+        folium.GeoJson(geo_data, name="Bangalore Boundaries", style_function=lambda x: boundary_style).add_to(m.m2)
+    except Exception as e:
+        st.error(f"Could not load GeoJSON. Please check the file path: {e}")
 
-    m.to_streamlit(height=650)
+    # FORCE Layer Control on both sides
+    folium.LayerControl(position='topright').add_to(m.m1)
+    folium.LayerControl(position='topright').add_to(m.m2)
 
+    # Render Dual Map
+    st_folium(m, width="100%", height=650, returned_objects=[])
 
 with col_chart:
     st.subheader("Distribution & Legend")
     
-    # 1. Plotly Chart
+    # Plotly Chart
     class_names = list(lcz_legend.keys())
     hex_colors = list(lcz_legend.values())
     df_stats['Name'] = df_stats['Class_ID'].apply(lambda x: class_names[x-1] if x <= len(class_names) else "Other")
@@ -101,10 +115,8 @@ with col_chart:
 
     st.markdown("---")
     
-    # 2. Fixed Legend (Cleaned up)
+    # Legend
     st.markdown("**Complete Classes Legend:**")
-    
-    # Usando HTML leve para gerar a legenda compacta e elegante embaixo do gráfico
     for name, color in lcz_legend.items():
         st.markdown(
             f'<div style="display: flex; align-items: center; margin-bottom: 4px;">'
