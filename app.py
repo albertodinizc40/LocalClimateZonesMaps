@@ -7,8 +7,8 @@ from matplotlib.colors import to_rgba
 
 # 1. Configuração da página
 st.set_page_config(page_title="LCZ Bangalore", layout="wide")
-st.title("🗺️ Zonas Climáticas Locais (LCZ) - Bangalore")
-st.markdown("Mapa interativo exibindo as classificações climáticas urbanas sobrepostas à imagem de satélite.")
+st.title("🗺️ Local Climate Zones - Bangalore")
+st.markdown("Testing a panel to analyze local climate zones")
 
 geojson_path = 'Bengalore_Boundaries.geojson'
 tif_path = 'lcz_clipped_mask.tif'
