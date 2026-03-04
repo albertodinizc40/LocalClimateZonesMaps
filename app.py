@@ -1,6 +1,6 @@
 import streamlit as st
 import folium
-from folium.plugins import DualMap
+from folium.plugins import SideBySideLayers
 from streamlit_folium import st_folium
 import rasterio
 import numpy as np
@@ -9,7 +9,7 @@ import plotly.express as px
 from matplotlib.colors import to_rgba
 import json
 
-# 1. Page Configuration
+# 1. Page Configuration (Sem menu lateral)
 st.set_page_config(page_title="LCZ Bangalore Dashboard", layout="wide")
 
 # --- LCZ CATEGORIES & COLORS ---
@@ -39,69 +39,80 @@ def process_spatial_data(tif_path):
 
 img_array, bounds, df_stats = process_spatial_data(tif_path)
 
-
 # --- MAIN LAYOUT ---
 st.title("🗺️ Local Climate Zones Dashboard - Bangalore")
-st.markdown("Overview of the urban climate distribution. Use the synchronized map below to compare the zones with satellite imagery.")
+st.markdown("Overview of the urban climate distribution. Swipe to compare LCZ (Left) with Satellite imagery (Right).")
 
 col_map, col_chart = st.columns([2.5, 1])
 
 with col_map:
-    # Prepare LCZ image layer
+    # Prepara a imagem LCZ colorida
     colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
     for idx, (name, hex_color) in enumerate(lcz_legend.items()):
         class_number = idx + 1 
         r, g, b, _ = to_rgba(hex_color)
         colored_img[img_array == class_number] = [r, g, b, 1.0]
 
-    # Initialize Synchronized Dual Map (Left and Right)
-    m = DualMap(location=[12.9716, 77.5946], zoom_start=11, layout='horizontal')
+    # Inicia o mapa Limpo
+    m = folium.Map(location=[12.9716, 77.5946], zoom_start=11, tiles=None)
 
-    # Add Satellite Basemap to BOTH sides
+    # 1. Camada Base Invisível (Para evitar tela cinza no fundo)
     folium.TileLayer(
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri Satellite',
-        name='Satellite Base'
-    ).add_to(m.m1)
-    
-    folium.TileLayer(
-        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri Satellite',
-        name='Satellite Base'
-    ).add_to(m.m2)
+        attr='Esri',
+        name='Base Background',
+        overlay=False,
+        control=False
+    ).add_to(m)
 
-    # Add LCZ Overlay ONLY TO THE LEFT SIDE (m.m1)
-    folium.raster_layers.ImageOverlay(
+    # 2. LADO ESQUERDO: Local Climate Zones
+    # O segredo: pane='tilePane' força a imagem a respeitar o corte do Swipe
+    lcz_layer = folium.raster_layers.ImageOverlay(
         image=colored_img,
         bounds=bounds,
-        name='Local Climate Zones',
-        show=True
-    ).add_to(m.m1)
+        name='Local Climate Zones (Left)',
+        overlay=True,
+        control=True,
+        pane='tilePane' 
+    ).add_to(m)
 
-    # Fix: Correctly load and style the GeoJSON boundaries
+    # 3. LADO DIREITO: Satélite Limpo
+    right_sat = folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri',
+        name='Satellite View (Right)',
+        overlay=True,
+        control=True,
+        pane='tilePane'
+    ).add_to(m)
+
+    # 4. Aplica o SWIPE (Exatamente igual a sua imagem de referência)
+    SideBySideLayers(layer_left=lcz_layer, layer_right=right_sat).add_to(m)
+
+    # 5. Fronteiras de Bangalore (Aparecem em cima de tudo)
     try:
         with open(geojson_path, 'r') as f:
             geo_data = json.load(f)
-        
-        boundary_style = {'fillOpacity': 0, 'color': 'white', 'weight': 3}
-        
-        # Add boundary to both maps so you never lose track of the city limits
-        folium.GeoJson(geo_data, name="Bangalore Boundaries", style_function=lambda x: boundary_style).add_to(m.m1)
-        folium.GeoJson(geo_data, name="Bangalore Boundaries", style_function=lambda x: boundary_style).add_to(m.m2)
+        folium.GeoJson(
+            geo_data,
+            name="Bangalore Boundaries",
+            style_function=lambda x: {'fillOpacity': 0, 'color': 'white', 'weight': 3},
+            control=True
+        ).add_to(m)
     except Exception as e:
-        st.error(f"Could not load GeoJSON. Please check the file path: {e}")
+        st.error("Erro ao carregar os limites. Verifique o arquivo GeoJSON.")
 
-    # FORCE Layer Control on both sides
-    folium.LayerControl(position='topright').add_to(m.m1)
-    folium.LayerControl(position='topright').add_to(m.m2)
+    # 6. Botão de Ligar/Desligar Camadas
+    folium.LayerControl(position='topright').add_to(m)
 
-    # Render Dual Map
+    # Renderiza o mapa ocupando o máximo de espaço
     st_folium(m, width="100%", height=650, returned_objects=[])
+
 
 with col_chart:
     st.subheader("Distribution & Legend")
     
-    # Plotly Chart
+    # Gráfico
     class_names = list(lcz_legend.keys())
     hex_colors = list(lcz_legend.values())
     df_stats['Name'] = df_stats['Class_ID'].apply(lambda x: class_names[x-1] if x <= len(class_names) else "Other")
@@ -115,7 +126,7 @@ with col_chart:
 
     st.markdown("---")
     
-    # Legend
+    # Legenda Fixa e Limpa
     st.markdown("**Complete Classes Legend:**")
     for name, color in lcz_legend.items():
         st.markdown(
