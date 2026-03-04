@@ -35,4 +35,4 @@ lcz_colors = list(lcz_legend.values())
 
 # 4. Criação do mapa
 # center=[latitude, longitude] aproxima a câmera de Bangalore logo ao abrir o site
-m = leafmap.Map(center=[12.9716,
+m = leafmap.Map(center=[12.9716, 77.5946], zoom=10)
