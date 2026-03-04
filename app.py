@@ -8,8 +8,8 @@ import pandas as pd
 import plotly.express as px
 from matplotlib.colors import to_rgba
 
-# 1. Page Configuration
-st.set_page_config(page_title="LCZ Bangalore Dashboard", layout="wide", initial_sidebar_state="expanded")
+# 1. Page Configuration (No more sidebar expanded by default)
+st.set_page_config(page_title="LCZ Bangalore Dashboard", layout="wide")
 
 # --- LCZ CATEGORIES & COLORS ---
 lcz_legend = {
@@ -38,22 +38,14 @@ def process_spatial_data(tif_path):
 
 img_array, bounds, df_stats = process_spatial_data(tif_path)
 
-# --- SIDEBAR (Cleaned up) ---
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/1865/1865313.png", width=50)
-    st.title("LCZ Explorer")
-    st.markdown("---")
-    st.write("**Area:** Bangalore, India")
-    st.write("**Resolution:** 100m")
 
-# --- MAIN LAYOUT ---
+# --- MAIN LAYOUT (Full Width, No Sidebar) ---
 st.title("🗺️ Local Climate Zones Dashboard - Bangalore")
+st.markdown("Overview of the urban climate distribution. Interact with the map and the charts below.")
 
-col_map, col_chart = st.columns([2, 1])
+col_map, col_chart = st.columns([2.5, 1]) # O mapa fica um pouco mais largo agora
 
 with col_map:
-    st.subheader("Interactive Swipe Comparison")
-    
     # Prepare LCZ image
     colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
     for idx, (name, hex_color) in enumerate(lcz_legend.items()):
@@ -61,32 +53,36 @@ with col_map:
         r, g, b, _ = to_rgba(hex_color)
         colored_img[img_array == class_number] = [r, g, b, 1.0]
 
-    # Initialize map with no default tiles to prevent conflicts
-    m = leafmap.Map(center=[12.9716, 77.5946], zoom=11, tiles=None)
+    # Initialize map
+    m = leafmap.Map(center=[12.9716, 77.5946], zoom=10, draw_control=False)
 
-    # LEFT LAYER: Local Climate Zones
-    left_layer = folium.raster_layers.ImageOverlay(
-        image=colored_img,
-        bounds=bounds,
-        name='LCZ Map',
-        zindex=1
-    ).add_to(m)
-    
     # RIGHT LAYER: Satellite imagery
-    right_layer = folium.TileLayer(
+    sat_layer = folium.TileLayer(
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         attr='Esri Satellite',
         name='Satellite View',
-        zindex=1
+        control=True
+    ).add_to(m)
+
+    # LEFT LAYER: Local Climate Zones
+    lcz_layer = folium.raster_layers.ImageOverlay(
+        image=colored_img,
+        bounds=bounds,
+        name='Local Climate Zones',
+        control=True
     ).add_to(m)
     
-    # Apply Swipe Plugin
-    SideBySideLayers(layer_left=left_layer, layer_right=right_layer).add_to(m)
+    # Apply Swipe Plugin (Side by Side)
+    SideBySideLayers(layer_left=lcz_layer, layer_right=sat_layer).add_to(m)
 
-    # City Boundaries
-    m.add_geojson(geojson_path, layer_name="Boundaries", fill_colors=['transparent'], weight=2, color="white")
+    # Boundaries
+    m.add_geojson(geojson_path, layer_name="City Boundaries", fill_colors=['transparent'], weight=2, color="white")
     
+    # FORÇA O MENU DE CAMADAS A APARECER
+    folium.LayerControl(position="topright").add_to(m)
+
     m.to_streamlit(height=650)
+
 
 with col_chart:
     st.subheader("Distribution & Legend")
@@ -105,13 +101,14 @@ with col_chart:
 
     st.markdown("---")
     
-    # 2. Fixed Legend (Under the chart)
-    st.markdown("**Legend (Full Classes):**")
-    legend_cols = st.columns(1)
+    # 2. Fixed Legend (Cleaned up)
+    st.markdown("**Complete Classes Legend:**")
+    
+    # Usando HTML leve para gerar a legenda compacta e elegante embaixo do gráfico
     for name, color in lcz_legend.items():
         st.markdown(
-            f'<div style="display: flex; align-items: center; margin-bottom: 3px;">'
-            f'<div style="width: 15px; height: 15px; background-color: {color}; margin-right: 10px; border: 0.5px solid grey;"></div>'
-            f'<span style="font-size: 0.85rem;">{name}</span></div>', 
+            f'<div style="display: flex; align-items: center; margin-bottom: 4px;">'
+            f'<div style="width: 16px; height: 16px; background-color: {color}; margin-right: 12px; border: 1px solid #ccc; border-radius: 2px;"></div>'
+            f'<span style="font-size: 0.85rem; color: #eee;">{name}</span></div>', 
             unsafe_allow_html=True
         )
