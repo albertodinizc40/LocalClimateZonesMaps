@@ -1,13 +1,14 @@
 import streamlit as st
 import leafmap.foliumap as leafmap
 import folium
+from folium.plugins import SideBySideLayers
 import rasterio
 import numpy as np
 import pandas as pd
 import plotly.express as px
 from matplotlib.colors import to_rgba
 
-# 1. Page Configuration (Must be the first command)
+# 1. Page Configuration
 st.set_page_config(page_title="LCZ Bangalore Dashboard", layout="wide", initial_sidebar_state="expanded")
 
 # --- DICTIONARY & COLORS ---
@@ -30,7 +31,6 @@ def process_spatial_data(tif_path):
         img_array = src.read(1)
         bounds = [[src.bounds.bottom, src.bounds.left], [src.bounds.top, src.bounds.right]]
     
-    # Count pixels for the chart (ignoring 0 which is transparent/background)
     unique, counts = np.unique(img_array, return_counts=True)
     df_stats = pd.DataFrame({'Class_ID': unique, 'Pixels': counts})
     df_stats = df_stats[df_stats['Class_ID'] > 0] 
@@ -39,48 +39,55 @@ def process_spatial_data(tif_path):
 
 img_array, bounds, df_stats = process_spatial_data(tif_path)
 
-
 # --- SIDEBAR MENU ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/1865/1865313.png", width=50)
     st.title("Map Controls")
-    st.markdown("Use the slider below to compare the Local Climate Zones with the real satellite imagery.")
-    
-    # Opacity Slider
-    opacity = st.slider("LCZ Layer Opacity", min_value=0.0, max_value=1.0, value=0.75, step=0.05)
-    
+    st.markdown("Use the **vertical swipe tool** on the map to compare the Local Climate Zones (Left) with the real Satellite imagery (Right).")
     st.markdown("---")
     st.markdown("**About the Project:**\nLocal Climate Zones (LCZ) analysis for urban planning and environmental monitoring.")
-
 
 # --- MAIN LAYOUT (DASHBOARD) ---
 st.title("🗺️ Local Climate Zones Dashboard - Bangalore")
 st.markdown("Overview of the urban climate distribution. Interact with the map and the charts below.")
 
-# Create two columns: Map (larger) and Chart (smaller)
 col_map, col_chart = st.columns([2, 1])
 
 with col_map:
-    st.subheader("Interactive Map")
+    st.subheader("Interactive Swipe Map")
     
-    # Create colored image using the sidebar opacity value
+    # Create colored image (Fully opaque for the swipe effect)
     colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
     for idx, (name, hex_color) in enumerate(lcz_legend.items()):
         class_number = idx + 1 
         r, g, b, _ = to_rgba(hex_color)
-        colored_img[img_array == class_number] = [r, g, b, opacity] 
+        colored_img[img_array == class_number] = [r, g, b, 1.0] # 100% opacity
 
-    # Build Map
-    m = leafmap.Map(center=[12.9716, 77.5946], zoom=10)
-    m.add_basemap("SATELLITE")
+    # Initialize Leafmap
+    m = leafmap.Map(center=[12.9716, 77.5946], zoom=10, draw_control=False)
+    m.clear_layers() # Clear default basemaps to avoid interference
     
-    folium.raster_layers.ImageOverlay(
+    # 1. Add Satellite Layer (Will be on the Right)
+    sat_layer = folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri Satellite',
+        name='Satellite Base',
+        overlay=True
+    ).add_to(m)
+    
+    # 2. Add LCZ Image Overlay (Will be on the Left)
+    lcz_layer = folium.raster_layers.ImageOverlay(
         image=colored_img,
         bounds=bounds,
-        name='LCZ Bangalore',
+        name='LCZ Overlay'
     ).add_to(m)
+    
+    # 3. Add the Side by Side (Swipe) Plugin
+    sbs = SideBySideLayers(layer_left=lcz_layer, layer_right=sat_layer)
+    sbs.add_to(m)
 
-    m.add_geojson(geojson_path, layer_name="Bangalore Boundaries", fill_colors=['transparent'], weight=3, color="white")
+    # 4. Add Boundaries and Legend
+    m.add_geojson(geojson_path, layer_name="Bangalore Boundaries", fill_colors=['transparent'], weight=2, color="white")
     m.add_legend(title="Local Climate Zones", legend_dict=lcz_legend)
     
     # Render map
@@ -89,18 +96,14 @@ with col_map:
 with col_chart:
     st.subheader("Zone Distribution")
     
-    # Prepare data for the chart
     class_names = list(lcz_legend.keys())
     hex_colors = list(lcz_legend.values())
     
-    # Map IDs to proper Names and Colors in the DataFrame
     df_stats['Name'] = df_stats['Class_ID'].apply(lambda x: class_names[x-1] if x <= len(class_names) else "Other")
     df_stats['Color'] = df_stats['Class_ID'].apply(lambda x: hex_colors[x-1] if x <= len(hex_colors) else "#000000")
     
-    # Sort and pick top 8 to keep the chart clean
     df_stats = df_stats.sort_values(by='Pixels', ascending=False).head(8)
     
-    # Create modern bar chart with Plotly
     fig = px.bar(
         df_stats, 
         x='Pixels', 
@@ -111,12 +114,10 @@ with col_chart:
         title="Top 8 Predominant Classes"
     )
     
-    # Clean up layout
     fig.update_layout(
         showlegend=False, 
         margin=dict(l=0, r=0, t=30, b=0), 
         yaxis={'categoryorder':'total ascending'}
     )
     
-    # Render chart
     st.plotly_chart(fig, use_container_width=True)
