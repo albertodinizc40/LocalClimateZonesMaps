@@ -1,6 +1,8 @@
 streamlit
 leafmap
-localtileserver
-geopandas
+folium
 rasterio
+numpy
+pandas
+plotly
 matplotlib
