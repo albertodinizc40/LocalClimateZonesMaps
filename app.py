@@ -1,14 +1,13 @@
 import streamlit as st
+import leafmap.foliumap as leafmap
 import folium
 from folium.plugins import SideBySideLayers
-from streamlit_folium import st_folium
 import rasterio
 import numpy as np
 import pandas as pd
 import plotly.express as px
 from matplotlib.colors import to_rgba
 import json
-from folium import Element
 
 # 1. Configuração da Página
 st.set_page_config(page_title="LCZ Bangalore Dashboard", layout="wide")
@@ -47,73 +46,70 @@ st.markdown("Overview of the urban climate distribution. Swipe to compare LCZ (L
 col_map, col_chart = st.columns([2.5, 1])
 
 with col_map:
-    # 1. Prepara a imagem LCZ colorida
+    # Prepara a imagem LCZ colorida (Opacidade 1.0 para o Swipe funcionar bem)
     colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
     for idx, (name, hex_color) in enumerate(lcz_legend.items()):
         class_number = idx + 1 
         r, g, b, _ = to_rgba(hex_color)
         colored_img[img_array == class_number] = [r, g, b, 1.0]
 
-    # 2. Inicia o mapa (Sem parâmetros que causem tela preta)
-    m = folium.Map(location=[12.9716, 77.5946], zoom_start=11)
+    # Inicia o mapa (Usando Leafmap de volta, que não causa crash de tela preta)
+    m = leafmap.Map(center=[12.9716, 77.5946], zoom=10, draw_control=False, tiles=None)
 
-    # ==============================================================
-    # 3. A MÁGICA: Injeção de JS para evitar o crash da tela preta!
-    # Isso ensina a ferramenta de Swipe a entender e cortar imagens.
-    # ==============================================================
-    js_fix = """
-    if (typeof L !== 'undefined' && L.ImageOverlay) {
-        L.ImageOverlay.prototype.getContainer = function() {
-            return this.getElement();
-        };
-    }
+    # =====================================================================
+    # O FIX DO SWIPE: Patch em JS para o Folium conseguir cortar imagens
+    # =====================================================================
+    js_patch = """
+    <script>
+        if (typeof window.L !== 'undefined' && window.L.ImageOverlay && !window.L.ImageOverlay.prototype.getContainer) {
+            window.L.ImageOverlay.prototype.getContainer = function() {
+                return this.getElement();
+            };
+        }
+    </script>
     """
-    m.get_root().script.add_child(Element(js_fix))
+    m.get_root().header.add_child(folium.Element(js_patch))
 
-    # 4. LADO DIREITO: Imagem de Satélite
-    right_sat = folium.TileLayer(
+    # 1. Mapa Base Universal (Satélite no fundo de tudo para não ter áreas cinzas)
+    folium.TileLayer(
         tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         attr='Esri',
-        name='Satellite View (Right)',
-        overlay=True,
-        control=True
+        name='Base Satellite',
+        control=False
     ).add_to(m)
 
-    # 5. LADO ESQUERDO: Zonas Climáticas Locais (Nossa Imagem)
-    lcz_layer = folium.raster_layers.ImageOverlay(
+    # 2. Camada da DIREITA (Satélite por cima)
+    sat_right = folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri',
+        name='Satellite View',
+        control=False
+    ).add_to(m)
+
+    # 3. Camada da ESQUERDA (Zonas Climáticas)
+    lcz_left = folium.raster_layers.ImageOverlay(
         image=colored_img,
         bounds=bounds,
-        name='Local Climate Zones (Left)',
-        overlay=True,
+        name='Local Climate Zones',
         control=True
     ).add_to(m)
 
-    # 6. Aplica o SWIPE (Que agora vai funcionar perfeitamente)
-    SideBySideLayers(layer_left=lcz_layer, layer_right=right_sat).add_to(m)
+    # 4. Aplica o SWIPE separando perfeitamente Esquerda e Direita
+    SideBySideLayers(layer_left=lcz_left, layer_right=sat_right).add_to(m)
 
-    # 7. Fronteiras de Bangalore
-    try:
-        with open(geojson_path, 'r') as f:
-            geo_data = json.load(f)
-        folium.GeoJson(
-            geo_data,
-            name="Bangalore Boundaries",
-            style_function=lambda x: {'fillOpacity': 0, 'color': 'white', 'weight': 3},
-            control=True
-        ).add_to(m)
-    except Exception as e:
-        st.error("Erro ao carregar os limites. Verifique o arquivo GeoJSON.")
+    # 5. Adiciona os limites da cidade por cima de tudo (Boundaries em branco)
+    m.add_geojson(geojson_path, layer_name="Bangalore Boundaries", fill_colors=['transparent'], weight=3, color="white")
 
-    # 8. Habilita o menu de Ligar/Desligar Camadas no canto
+    # Garante o botão de menu de camadas
     folium.LayerControl(position='topright').add_to(m)
 
-    # 9. Renderiza
-    st_folium(m, width="100%", height=650, returned_objects=[])
+    # Renderiza na tela de forma segura contra crashes
+    m.to_streamlit(height=650)
 
-# --- GRÁFICO E LEGENDA ---
 with col_chart:
     st.subheader("Distribution & Legend")
     
+    # Gráfico
     class_names = list(lcz_legend.keys())
     hex_colors = list(lcz_legend.values())
     df_stats['Name'] = df_stats['Class_ID'].apply(lambda x: class_names[x-1] if x <= len(class_names) else "Other")
@@ -126,6 +122,8 @@ with col_chart:
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
+    
+    # Legenda Fixa
     st.markdown("**Complete Classes Legend:**")
     for name, color in lcz_legend.items():
         st.markdown(
