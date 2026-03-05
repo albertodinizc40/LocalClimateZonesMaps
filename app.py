@@ -67,7 +67,6 @@ colored_img = build_colored_rgba(img_array, lcz_lookup)
 st.title("Local Climate Zones Dashboard - Bangalore")
 st.markdown("Overview of the urban climate distribution. Use the top-right menu on the map to toggle layers.")
 
-# mais espaço para o mapa + alinhamento melhor
 col_map, col_chart = st.columns([3.3, 1])
 
 with col_map:
@@ -88,7 +87,7 @@ with col_map:
         force_separate_button=True
     ).add_to(m)
 
-    # 1) Base Satellite (mantém como fundo fixo)
+    # 1) Base Satellite
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri",
@@ -96,7 +95,7 @@ with col_map:
         control=False
     ).add_to(m)
 
-    # 2) Camada LCZ (opacidade padrão; slider será injetado no LayerControl)
+    # 2) Camada LCZ (opacidade padrão)
     lcz_opacity_default = 0.80
     lcz_overlay = folium.raster_layers.ImageOverlay(
         image=colored_img,
@@ -134,27 +133,23 @@ with col_map:
     lc.add_to(m)
 
     # ==========================================
-    # 5) INJETAR SLIDER DE OPACIDADE "DENTRO" DO LayerControl
-    #    - tecnicamente adiciona HTML no container do LayerControl (Leaflet)
+    # 5) INJETAR SLIDER DE OPACIDADE NO LayerControl (LCZ opacity em negrito)
     # ==========================================
-    lcz_var = lcz_overlay.get_name()  # nome da variável JS do overlay
+    lcz_var = lcz_overlay.get_name()
 
     inject_opacity_slider = f"""
     <script>
     (function() {{
       function addOpacitySlider() {{
-        // Container do LayerControl
         var lc = document.querySelector('.leaflet-control-layers');
         if (!lc) return;
 
-        // Evita duplicar
         if (lc.querySelector('#lcz-opacity-wrap')) return;
 
-        // Cria bloco
         var wrap = document.createElement('div');
         wrap.id = 'lcz-opacity-wrap';
         wrap.style.padding = '8px 10px';
-        wrap.style.borderTop = '1px solid rgba(255,255,255,0.15)';
+        wrap.style.borderTop = '1px solid rgba(0,0,0,0.12)';
         wrap.style.marginTop = '6px';
 
         var label = document.createElement('div');
@@ -162,7 +157,7 @@ with col_map:
         label.style.fontSize = '12px';
         label.style.fontWeight = 'bold';
         label.style.marginBottom = '6px';
-        label.style.color = '#eaeaea';
+        label.style.color = '#111';
 
         var row = document.createElement('div');
         row.style.display = 'flex';
@@ -175,36 +170,40 @@ with col_map:
         input.max = 1;
         input.step = 0.05;
         input.value = {lcz_opacity_default};
-        input.style.width = '140px';
+        input.style.width = '150px';
 
         var val = document.createElement('span');
-        val.textContent = input.value;
+        val.textContent = Number(input.value).toFixed(2);
         val.style.fontSize = '12px';
-        val.style.minWidth = '32px';
-        val.style.color = '#eaeaea';
+        val.style.minWidth = '34px';
+        val.style.color = '#111';
 
-        input.addEventListener('input', function(e) {{
-          var v = parseFloat(e.target.value);
-          val.textContent = v.toFixed(2);
-
-          // Aplica opacidade no overlay LCZ
+        function applyOpacity(v) {{
           try {{
             if (window.{lcz_var} && window.{lcz_var}.setOpacity) {{
               window.{lcz_var}.setOpacity(v);
             }}
           }} catch (err) {{}}
+        }}
+
+        input.addEventListener('input', function(e) {{
+          var v = parseFloat(e.target.value);
+          val.textContent = v.toFixed(2);
+          applyOpacity(v);
         }});
 
         row.appendChild(input);
         row.appendChild(val);
+
         wrap.appendChild(label);
         wrap.appendChild(row);
 
-        // Insere no fim do LayerControl
         lc.appendChild(wrap);
+
+        // aplica opacidade inicial de forma garantida
+        applyOpacity(parseFloat(input.value));
       }}
 
-      // Tenta algumas vezes porque o Leaflet monta DOM depois
       var tries = 0;
       var timer = setInterval(function() {{
         tries++;
@@ -218,13 +217,11 @@ with col_map:
     """
     m.get_root().html.add_child(Element(inject_opacity_slider))
 
-    # Renderiza o mapa
     components.html(m.get_root().render(), height=720)
 
 with col_chart:
     st.subheader("Distribution & Legend")
 
-    # Gráfico
     df_stats["Name"] = df_stats["Class_ID"].map(lambda x: lcz_lookup.get(x, {}).get("name", "Other"))
     df_stats["Color"] = df_stats["Class_ID"].map(lambda x: lcz_lookup.get(x, {}).get("color", "#000000"))
 
@@ -244,7 +241,6 @@ with col_chart:
 
     st.markdown("---")
 
-    # Legenda completa
     st.markdown("Complete Classes Legend:")
     for name, color in lcz_legend.items():
         st.markdown(
