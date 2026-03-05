@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 from matplotlib.colors import to_rgba
+import json
 
 # ==========================================
 # 1. CONFIGURAÇÃO DA PÁGINA
@@ -58,11 +59,14 @@ st.markdown("Overview of the urban climate distribution. Use the top-right menu 
 col_map, col_chart = st.columns([2.5, 1])
 
 with col_map:
-    # Prepara a imagem LCZ colorida
+    # Controle de Opacidade restaurado
+    layer_opacity = st.slider("LCZ Layer Transparency", min_value=0.0, max_value=1.0, value=0.8, step=0.05)
+
+    # Prepara a imagem LCZ colorida (Alpha fixo em 1.0, a transparência é gerida pelo Folium)
     colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
     for class_id, info in lcz_lookup.items():
         r, g, b, _ = to_rgba(info["color"])
-        colored_img[img_array == class_id] = [r, g, b, 0.8] # Fixei a opacidade em 0.8 para ver um pouco o fundo
+        colored_img[img_array == class_id] = [r, g, b, 1.0]
 
     # Inicia o Mapa Base
     m = folium.Map(location=[12.9716, 77.5946], zoom_start=10, tiles=None)
@@ -75,18 +79,29 @@ with col_map:
         control=False
     ).add_to(m)
 
-    # 2. Adiciona a Camada LCZ (Imagem)
+    # 2. Adiciona a Camada LCZ aplicando a transparência do Slider
     folium.raster_layers.ImageOverlay(
         image=colored_img,
         bounds=bounds,
+        opacity=layer_opacity,
         name='Local Climate Zones',
         show=True
     ).add_to(m)
 
-    # 3. Adiciona os Limites (Boundaries)
+    # 3. Adiciona os Limites (Removendo qualquer Ponto que cause o marcador azul)
     try:
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            geo_data = json.load(f)
+        
+        # Filtra e remove elementos do tipo 'Point' do GeoJSON
+        if 'features' in geo_data:
+            geo_data['features'] = [
+                feat for feat in geo_data['features'] 
+                if feat.get('geometry', {}).get('type') not in ['Point', 'MultiPoint']
+            ]
+            
         folium.GeoJson(
-            geojson_path,
+            geo_data,
             name="Bangalore Boundaries",
             style_function=lambda feature: {
                 'fillColor': 'transparent',
@@ -95,12 +110,12 @@ with col_map:
             }
         ).add_to(m)
     except Exception as e:
-        pass
+        st.warning(f"Could not load boundaries: {e}")
 
-    # 4. Adiciona o controle de camadas
+    # 4. Adiciona o controle de camadas (Ligar/Desligar)
     folium.LayerControl(position='topright').add_to(m)
 
-    # Renderiza de forma estática (SEM O PONTO AZUL)
+    # Renderiza o mapa de forma estática via HTML puro
     components.html(m.get_root().render(), height=650)
 
 with col_chart:
@@ -121,12 +136,7 @@ with col_chart:
 
     st.markdown("---")
     
-    # Legenda restaurada para o seu formato original que funciona bem no Streamlit
+    # Legenda restaurada sem quebras de linha para evitar formatação errada no Streamlit
     st.markdown("**Complete Classes Legend:**")
     for name, color in lcz_legend.items():
-        st.markdown(
-            f'<div style="display: flex; align-items: center; margin-bottom: 4px;">'
-            f'<div style="width: 16px; height: 16px; background-color: {color}; margin-right: 12px; border: 1px solid #ccc; border-radius: 2px;"></div>'
-            f'<span style="font-size: 0.85rem; color: #eee;">{name}</span></div>', 
-            unsafe_allow_html=True
-        )
+        st.markdown(f'<div style="display: flex; align-items: center; margin-bottom: 4px;"><div style="width: 16px; height: 16px; background-color: {color}; margin-right: 12px; border: 1px solid #ccc; border-radius: 2px;"></div><span style="font-size: 0.85rem; color: #eee;">{name}</span></div>', unsafe_allow_html=True)
