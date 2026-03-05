@@ -54,23 +54,71 @@ img_array, bounds, df_stats = process_spatial_data(tif_path)
 # 4. LAYOUT PRINCIPAL
 # ==========================================
 st.title("🗺️ Local Climate Zones Dashboard - Bangalore")
-st.markdown("Overview of the urban climate distribution.")
+st.markdown("Overview of the urban climate distribution. Use the top-right menu on the map to toggle layers.")
 
-# Criamos as colunas
 col_map, col_chart = st.columns([2.5, 1])
 
-# ==========================================
-# COLUNA DIREITA: CONTROLES, GRÁFICO E LEGENDA
-# (Executamos essa parte primeiro para pegar o valor do slider)
-# ==========================================
+with col_map:
+    # Controle de Opacidade restaurado
+    layer_opacity = st.slider("LCZ Layer Transparency", min_value=0.0, max_value=1.0, value=0.8, step=0.05)
+
+    # Prepara a imagem LCZ colorida (Alpha fixo em 1.0, a transparência é gerida pelo Folium)
+    colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
+    for class_id, info in lcz_lookup.items():
+        r, g, b, _ = to_rgba(info["color"])
+        colored_img[img_array == class_id] = [r, g, b, 1.0]
+
+    # Inicia o Mapa Base
+    m = folium.Map(location=[12.9716, 77.5946], zoom_start=10, tiles=None)
+
+    # 1. Adiciona o Mapa de Satélite
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri',
+        name='Base Satellite',
+        control=False
+    ).add_to(m)
+
+    # 2. Adiciona a Camada LCZ aplicando a transparência do Slider
+    folium.raster_layers.ImageOverlay(
+        image=colored_img,
+        bounds=bounds,
+        opacity=layer_opacity,
+        name='Local Climate Zones',
+        show=True
+    ).add_to(m)
+
+    # 3. Adiciona os Limites (Removendo qualquer Ponto que cause o marcador azul)
+    try:
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            geo_data = json.load(f)
+        
+        # Filtra e remove elementos do tipo 'Point' do GeoJSON
+        if 'features' in geo_data:
+            geo_data['features'] = [
+                feat for feat in geo_data['features'] 
+                if feat.get('geometry', {}).get('type') not in ['Point', 'MultiPoint']
+            ]
+            
+        folium.GeoJson(
+            geo_data,
+            name="Bangalore Boundaries",
+            style_function=lambda feature: {
+                'fillColor': 'transparent',
+                'color': 'white',
+                'weight': 2
+            }
+        ).add_to(m)
+    except Exception as e:
+        st.warning(f"Could not load boundaries: {e}")
+
+    # 4. Adiciona o controle de camadas (Ligar/Desligar)
+    folium.LayerControl(position='topright').add_to(m)
+
+    # Renderiza o mapa de forma estática via HTML puro
+    components.html(m.get_root().render(), height=650)
+
 with col_chart:
-    st.subheader("⚙️ Map Controls")
-    
-    # O slider agora fica no painel lateral, parecendo uma central de controle
-    # Mudei a formatação para exibir em porcentagem (ex: 50%) para ficar igual à sua imagem
-    layer_opacity = st.slider("LCZ Layer Transparency", min_value=0, max_value=100, value=80, step=5, format="%d%%") / 100.0
-    
-    st.markdown("---")
     st.subheader("Distribution & Legend")
     
     # Gráfico
@@ -88,67 +136,7 @@ with col_chart:
 
     st.markdown("---")
     
-    # Legenda
+    # Legenda restaurada sem quebras de linha para evitar formatação errada no Streamlit
     st.markdown("**Complete Classes Legend:**")
     for name, color in lcz_legend.items():
         st.markdown(f'<div style="display: flex; align-items: center; margin-bottom: 4px;"><div style="width: 16px; height: 16px; background-color: {color}; margin-right: 12px; border: 1px solid #ccc; border-radius: 2px;"></div><span style="font-size: 0.85rem; color: #eee;">{name}</span></div>', unsafe_allow_html=True)
-
-
-# ==========================================
-# COLUNA ESQUERDA: MAPA
-# ==========================================
-with col_map:
-    # Prepara a imagem LCZ colorida
-    colored_img = np.zeros((img_array.shape[0], img_array.shape[1], 4))
-    for class_id, info in lcz_lookup.items():
-        r, g, b, _ = to_rgba(info["color"])
-        colored_img[img_array == class_id] = [r, g, b, 1.0]
-
-    # Inicia o Mapa Base
-    m = folium.Map(location=[12.9716, 77.5946], zoom_start=10, tiles=None)
-
-    # 1. Adiciona o Mapa de Satélite
-    folium.TileLayer(
-        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr='Esri',
-        name='Base Satellite',
-        control=False
-    ).add_to(m)
-
-    # 2. Adiciona a Camada LCZ aplicando a transparência capturada no painel lateral
-    folium.raster_layers.ImageOverlay(
-        image=colored_img,
-        bounds=bounds,
-        opacity=layer_opacity,
-        name='Local Climate Zones',
-        show=True
-    ).add_to(m)
-
-    # 3. Adiciona os Limites (Sem o ponto azul)
-    try:
-        with open(geojson_path, 'r', encoding='utf-8') as f:
-            geo_data = json.load(f)
-        
-        if 'features' in geo_data:
-            geo_data['features'] = [
-                feat for feat in geo_data['features'] 
-                if feat.get('geometry', {}).get('type') not in ['Point', 'MultiPoint']
-            ]
-            
-        folium.GeoJson(
-            geo_data,
-            name="Bangalore Boundaries",
-            style_function=lambda feature: {
-                'fillColor': 'transparent',
-                'color': 'white',
-                'weight': 2
-            }
-        ).add_to(m)
-    except Exception as e:
-        pass
-
-    # 4. Adiciona o controle de camadas (Ligar/Desligar) ainda no mapa
-    folium.LayerControl(position='topright').add_to(m)
-
-    # Renderiza o mapa
-    components.html(m.get_root().render(), height=850)
