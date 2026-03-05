@@ -160,6 +160,7 @@ with col_map:
         var label = document.createElement('div');
         label.textContent = 'LCZ opacity';
         label.style.fontSize = '12px';
+        label.style.fontWeight = 'bold';
         label.style.marginBottom = '6px';
         label.style.color = '#eaeaea';
 
